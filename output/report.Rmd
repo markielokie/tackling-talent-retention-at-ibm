@@ -1,0 +1,1330 @@
+---
+title: "HR Analytics using Supervised and Unsupervised Machine Learning in R"
+subtitle: "Tackling Talent Retention at IBM"
+author: "Marcus Loke, Jisu Baek, Julia Ju, Yuzhe Sun"
+date: "July 22, 2021"
+output:
+  html_document: 
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(dplyr) # data workhorse
+library(ggplot2)
+library(correlationfunnel) # rapid exploratory data analysis
+library(cluster) # calculating gower distance and PAM
+library(Rtsne) # dimensionality reduction and visualization
+library(plotly) # interactive graphing
+library(DT) # interactive tables
+library(forcats) # relevel factors
+library(skimr) # summary statistics
+library(readxl) # read excel files
+library(tm) # text mining
+library(tidyr) # string manipulation
+library(tidytext) # text mining
+library(caret)
+library(corrplot)
+library(car)
+library(ROCR)
+library(rpart)
+library(DT)
+library(flexclust)
+library(tm)
+library(stringr)
+library(sentimentr)
+
+# Set working directory to where test and train data are
+setwd("../HR Analytics/")
+
+# Load data
+dat_hr <- read.csv("WA_Fn-UseC_-HR-Employee-Attrition.csv", stringsAsFactors=T)
+dat_gd <- read_excel('IBMReviewsGlassdoor_USA.xlsx')
+```
+
+## Problem Statement
+
+Why do so many tech employees choose to leave their companies? According to a news release in 2018, the tech industry was notorious for a high employee turnover rate of 13.2%, as compared to other industries such as Media and Entertainment (11.4%), Government/Education (11.2%) and Financial Services (10.8%) ([viGlobal, 2018][viGlobal, 2018]). Given the pervasive turnover within the industry, should such culture be accepted in HR talent management teams? Or are there preemptive data-driven strategies that can be employed to tackle staff retention?
+
+High turnover has adverse effects on the business. From a monetary standpoint, the amount that the company needs to spend on a replacement staff can range from one to seven times the employee’s annual salary, and this is due to many factors including, inter alia, the cost and time to find replacements and the revenue contribution attributed to that employee ([Kochanski & Ledford, 2001][Kochanski & Ledford, 2001] and [The Build Network, 2014][The Build Network, 2014]). Other impacts include low morale for the team and bottlenecks caused by the laborious efforts needed to onboard incoming staff, exacerbated by the knowledge drain of the outgoing staff. 
+
+Since 2012, International Business Machines Corp., otherwise known as IBM, has been facing a steady decline in the number of employees year-on-year, with a total reduction of about 20% of its workforce from then till 2020 ([Alsop, 2021][Alsop, 2021]). This does not bode well for the company especially when talent retention is key to driving revenue growth. The perennial challenge of retaining talents and skilled employees therefore presents a strong business case for IBM to invest in talent retention strategies. For this reason, this project seeks to explore various machine learning methodologies to predict turnover, characterize and personify the type of employee that would leave, and delve into the reasons that could be driving talents away. Armed with these insights, IBM can curate targeted HR strategies for more effective talent retention.
+
+## Literature Review
+
+A myriad of research studies have been conducted on tech employees’ intention to leave ([Ghapanchi & Aurum, 2011][Ghapanchi & Aurum, 2011]). While there are many organizational antecedents/factors that affect attrition, the reasons can be categorized into five (5) broad categories: individual factors, organizational factors, job-related factors, psychological factors and environmental factors, among which, job-related antecedents such as role ambiguity and role conflicts are the most often cited drivers that trigger turnovers ([Ghapanchi & Aurum, 2011][Ghapanchi & Aurum, 2011]). Further corroborating this phenomena, according to a leadership management whitepaper by IBM Smarter Workforce Institute, who conducted an in-depth research among more than 20,000 employees, job-related reasons are the biggest factors (cited by 40% of respondents) for leaving because employees are not happy with their jobs ([Zhang & Feinzig, 2016][Zhang & Feinzig, 2016]).
+
+While Ghapanchi & Aurum (2011) and Zhang & Feinzig (2016) suggest that job-related factors are the most cited reason for turnover, recent studies have found psychological factors such as pay satisfaction to be the dominant factor. According to the Deloitte Global Millennial Survey in 2019, close to half of the respondents (49%) reported that they would leave their jobs if they had a choice, of which 43% of them cited dissatisfaction with their pay and benefits as the top reason for leaving ([Deloitte, 2019][Deloitte, 2019]). In the tech industry, the results are worse. According to the Dice Survey in 2019, which is a salary report of United States tech firms, 45% of respondents highlighted they would like to change employers within the next year, of which 71% of them cited they are seeking salary compensation as the top reason as to why they would leave ([The Dice, 2020][The Dice, 2020]). The high turnover in the entire tech industry, and in top tech firms in particular, are likely a result of the increasing demand for tech talents, driven by the rapid growth in technology ([Hecker, 2005][Hecker, 2005]), which results in a race to attract talents commensurate with increased compensation ([ViGlobal, 2018][ViGlobal, 2018]).
+
+Diving deeper into the insights by the IBM whitepaper, it also suggests that turnover rates can vary across generations. For instance, early and mid-career workers are more likely to leave the job for better career opportunities, as mentioned by 74% of Millennials, 68% of Generation Xs and 54% of Baby Boomers ([Zhang & Feinzig, 2016][Zhang & Feinzig, 2016]). In a similar trend, the study also highlighted that early and mid-career workers have higher propensity to leave the job for greater employer brands and greater flexibility at work ([Zhang & Feinzig, 2016][Zhang & Feinzig, 2016]).  
+
+Regardless of the reasons for turnover, the high turnover of employees in the tech industry presents many ramifications to the organization. The direct effect is that the turnover of employees will slow down the company’s overall business and bring productivity losses. For instance, if an existing software developer leaves, the company often has to take 43 days on average to hire a new one, which is approximately a month and a half of productivity loss and it does not account for onboarding ([Lewis, 2020][Lewis, 2020]). This consequence will cost the company as much as US$33,251 for each employee who leaves ([Lewis, 2020][Lewis, 2020]). Apart from the cost related to productivity loss, some sources also factor in the loss of intellectual capital attributed to the departing employees and the time needed to onboard new staff ([Kochanski & Ledford, 2001][Kochanski & Ledford, 2001]).
+
+As can be seen from the various studies mentioned above, there are a variety of reasons as to why employees would leave a company -- job fit, pay satisfaction, career development, etc. and the list goes on. As the tech industry grows and evolves, one is unable to generalize a particular evergreen reason for employees leaving a company because of cultural shifts, demography shifts and generational differences over time, among others (i.e., the reason for an employee leaving IBM in the early 2000s may be different than an employee leaving in 2020). Likewise, an evergreen solution to tackle talent retention in a company would be futile due to the said reasons. Furthermore, due to the many ramifications turnover has on the organization, there is a strong impetus to improve staff retention. This underscores the need for a current, up-to-date, data-driven approach that leverages on existing live employee data to uncover the latest/current reasons that could be driving talents away so that IBM can predict and personify/characterize the type of employees that might leave the organization. These insights would enable better formulation of HR strategies for talent retention.
+
+## Research Questions
+
+Myriad factors could affect employee attrition. However, this project aims to identify the salient factors that influences attrition at IBM so that management can make HR decisions for the greatest impact. Our study focuses on internal attrition data from IBM and employee reviews from Glassdoor. We aim to provide IBM with valuable insights that could lead to the most effective and efficient solutions to improve talent retention by answering the following three (3) questions:
+
+> 1. *What are the key driving factors influencing attrition the most at IBM?*
+
+The first question explores the key factors that influences attrition at IBM, among the many other factors cited by Ghapanchi & Aurum (2011) and Zhang & Feinzig (2016). Having such insights would allow IBM HR to develop watch-areas on these factors to improve retention.
+
+> 2. *Who is likely to leave IBM?*
+
+The second question is a prediction problem, where we aim to fit a model with the key factors identified in Question 1. The model accuracy will be optimized by various supervised and unsupervised techniques such as logistic regression, sentiment analysis and clustering. This will help IBM HR to identify talents who are at risk of leaving.
+
+> 3. *What is the employee type that has the highest tendency to leave IBM?*
+
+Finally, the third question seeks to personify/characterize the type of employee that has the highest risk of leaving IBM, which will allow better formulation of HR strategies to retain such individuals with such a persona. Depending on how many personas we can achieve through our analysis, we can adopt a risk-based approach to curate unique HR strategies for employees with different personas.
+
+## Data Description
+
+We have two datasets for this project, as shown:
+
+1. IBM Attrition Dataset: `dat_hr`
+2. Glassdoor Scraped Text Dataset: `dat_gd`
+
+The first dataset (`dat_hr`) is taken from IBM and it consists of attrition data and demographic variables such as employee satisfaction, income and education, among others, while the second dataset (`dat_gd`) is collected by scraping Glassdoor and it contains past and present IBM employee text reviews and ratings of the company. Details of the various data fields can be found in the **Appendix**.
+
+## Data Preparation
+
+### IBM Attrition Dataset
+
+The first thing that we will do is to get a detailed overview of the data in the IBM attrition dataset, `dat_hr`. We use `skim()` instead of the conventional `glimpse()` and `str()` as it offers additional insights such as the number of missing observations, complete rate and the number of unique observations for both factor and numeric column types. It also returns statistical summaries, which are really useful for quick analysis.
+
+```{r prep, echo=FALSE}
+skim(dat_hr)
+```
+
+Here we perform some data transformation, like renaming column names with typos in them and converting some column types into the appropriate data types.
+
+```{r rename, echo=TRUE}
+# Renaming the Age column
+dat_hr <- dat_hr %>%
+  dplyr::rename(Age = ï..Age)
+```
+
+```{r convert, echo=TRUE}
+# Converting numeric to factor
+dat_hr$Education <- as.factor(dat_hr$Education)
+dat_hr$EnvironmentSatisfaction <- as.factor(dat_hr$EnvironmentSatisfaction)
+dat_hr$JobInvolvement <- as.factor(dat_hr$JobInvolvement)
+dat_hr$JobLevel <- as.factor(dat_hr$JobLevel)
+dat_hr$JobSatisfaction <- as.factor(dat_hr$JobSatisfaction)
+dat_hr$StockOptionLevel <- as.factor(dat_hr$StockOptionLevel)
+dat_hr$PerformanceRating <- as.factor(dat_hr$PerformanceRating)
+dat_hr$RelationshipSatisfaction <- as.factor(dat_hr$RelationshipSatisfaction)
+dat_hr$WorkLifeBalance <- as.factor(dat_hr$WorkLifeBalance)
+```
+
+Based on the `skim()` summary above, there are a few variables that only have one unique value. These variables are: `Over18`, `EmployeeCount` and `StandardHours`. We will remove these columns as they are not useful for the modeling process.
+
+```{r remove, echo=TRUE}
+dat_hr <- dat_hr %>%
+  dplyr::select(-Over18, -EmployeeCount, -StandardHours)
+```
+
+As a final check, we ensure that there are no `NAs` in the dataset.
+
+```{r na, echo=TRUE}
+sum(is.na(dat_hr))
+```
+
+Finally, this is the cleaned `dat_hr` dataset that is ready for analysis work.
+
+```{r dat_hr_cleaned, echo=FALSE}
+glimpse(dat_hr)
+```
+
+### Glassdoor Scraped Text Dataset
+
+The first thing we will do is to get an overview of what the scraped data looks like. We use the `glimpse()` function for that. As you can see from the summary below, much cleaning is needed to prepare the data for text mining. For instance, `Ratings` need to be in numeric form, `Current_Former` needs to be factorized, `Review_ID` has web links that need to be truncated, `Role` has dates concatenated with the roles, `Location` can be shortened to the 2-letter state abbreviation for standardization purposes and to tokenize the `Pros` and `Cons` columns using `tidytext`.
+
+```{r skim, echo=FALSE}
+glimpse(dat_gd)
+```
+
+Here we perform the necessary data preparation.
+
+Clean the `Ratings` column.
+
+```{r ratings, warning=FALSE}
+# Convert Ratings to numeric
+dat_gd$Ratings <- as.numeric(dat_gd$Ratings)
+```
+
+Clean the `Current_Former` column. Notice that the employment length is concatenated with the string. Therefore we need to separate the employment length from the column and create a new column for it.
+
+```{r currentformer, warning=FALSE}
+# Split the string into 2 columns: Current_Former and Employment_Length
+dat_gd <- dat_gd %>%
+  separate(Current_Former, c("Current_Former", "Employment_Length"), ", ")
+
+# Convert Current_Former to factor
+dat_gd$Current_Former <- as.factor(dat_gd$Current_Former)
+```
+
+Clean `Review_ID` column.
+
+```{r reviewid, warning=FALSE}
+# Extract review IDs from web links
+dat_gd$Review_ID <- sub("https://www.glassdoor.sg/Reviews/Employee-Review-IBM-RVW", "", dat_gd$Review_ID)
+dat_gd$Review_ID <- sub(".htm", "", dat_gd$Review_ID)
+
+# Convert Review_ID to numeric
+dat_gd$Review_ID <- as.numeric(dat_gd$Review_ID)
+```
+
+Check for duplicates in the `Review_ID`.
+
+```{r duplicate1}
+dim(dat_gd[duplicated(dat_gd$Review_ID),])[1]
+```
+
+There is 1 duplicate entry. Check for the specific `Review_ID` that is duplicated.
+
+```{r duplicate2}
+dat_gd[duplicated(dat_gd$Review_ID),]
+```
+
+`Review_ID` 42772946 is duplicated and we will remove it from the data.
+
+```{r duplicate3}
+dat_gd <- dat_gd[!duplicated(dat_gd$Review_ID),]
+```
+
+```{r roleclean, echo=FALSE}
+dat_gd[181,"Role"] <- "23 Apr 2021 - Digital Sales"
+dat_gd[427,"Role"] <- "31 Mar 2021 - Support Services Representative"
+dat_gd[628,"Role"] <- "15 Apr 2021 - Senior Project Manager"
+dat_gd[680,"Role"] <- "15 Feb 2021 - Manager"
+dat_gd[829,"Role"] <- "3 Feb 2021 - Support Services Representative"
+```
+
+Clean the `Role` column.
+
+```{r roleclean2}
+# Separate the date portion from the role portion
+dat_gd <- dat_gd %>%
+  separate(Role, c("Review_Date", "Role"), " - ") 
+
+# Convert Review_Date to date format
+dat_gd$Review_Date <- as.Date(dat_gd$Review_Date, "%d %b %Y")
+```
+
+Clean the `Location` column.
+
+```{r location}
+# Extract the 2-letter state abbreviation
+dat_gd$Location <- sub(".*,\\s*", "", dat_gd$Location)
+```
+
+Check whether there are outliers in the `Location` column that do not conform to the 2-letter state abbreviation.
+
+```{r location2}
+dat_gd$Location[nchar(dat_gd$Location) != 2]
+```
+
+There are two places that are not in the United States. Tarlac is in Philippines while Chennai is in India. We will remove these rows from the data and convert the type to factor.
+
+```{r location3}
+# Remove rows
+dat_gd <- dat_gd[nchar(dat_gd$Location) == 2,]
+
+# Convert character to factor
+dat_gd$Location <- as.factor(dat_gd$Location)
+```
+
+Finally, this is the cleaned `dat_gd` dataset that is ready for analysis work.
+
+```{r glimpse, echo=FALSE}
+glimpse(dat_gd)
+```
+
+## Exploratory Data Analysis
+
+### IBM Attrition Dataset
+
+The outcome variable is `Attrition` and we want to know its distribution.
+
+```{r attrition, echo=TRUE}
+table(dat_hr$Attrition)
+```
+
+Perhaps visualizing it may be better to understand the distribution.
+
+```{r visualattr, warning=FALSE, message=FALSE}
+dat_hr %>%
+  dplyr::group_by(Attrition) %>%
+  dplyr::summarise(Total = n()) %>%
+  ggplot(aes(x=Attrition, y=Total, fill=Attrition)) +
+  geom_col() +
+  ggtitle("Distribution of Attrition") +
+  theme_classic()
+```
+
+Let's explore the attrition by income level.
+
+```{r income}
+dat_hr %>%
+  ggplot(aes(x=MonthlyIncome, fill=Attrition)) +
+  geom_density(alpha=0.6) +
+  labs(x="Monthly Income", y="") +
+  ggtitle("Attrition by Income Level") +
+  theme_classic()
+```
+
+Exploring attrition rates with respect to age.
+
+```{r overtime, warning=FALSE, message=FALSE}
+dat_hr %>%
+  ggplot(aes(x=Attrition, y=Age, fill=Attrition)) +
+  geom_boxplot() +
+  ggtitle("Attrition by Age") +
+  theme_classic()
+```
+
+Here we calculate the correlation between `Attrition` and the rest of the variables in the dataset. A correlation funnel is plotted using the `correlationfunnel` library and it shows us the variables that have the highest to lowest correlation with `Attrition` (like a funnel). To interpret the plot, for instance, we notice that `OverTime` is highly correlated with `Attrition` as it sits on the top of the funnel. Heuristically speaking, employees who work overtime would likely lead to higher attrition due to increased workloads and lengthier working hours. Our correlation plot reflects this observation, which shows that employees who work overtime have positive correlation (right side of the funnel) while those who do not work overtime have negative correlation (left side of the funnel) to `Attrition`. 
+
+To select variables for modeling and clustering work, we will select a correlation threshold (e.g., > 0.1) as it does not make sense to include all variables -- this will complicate the analysis of the results and make it more difficult for IBM stakeholders to act upon the findings.
+
+```{r corrfunnel, echo=FALSE, warning=FALSE}
+# Binarize continuous variables  and one hot encode factors
+dat_hr_corr <- dat_hr %>%
+  dplyr::select(-EmployeeNumber) %>%
+  binarize(n_bins=5, thresh_infreq=0.01, name_infreq="OTHER", one_hot=T) %>%
+  correlate(Attrition__Yes)
+
+# Plot correlation funnel
+dat_hr_corr %>%
+  plot_correlation_funnel() %>%
+  ggplotly()
+```
+
+### Glassdoor Scraped Text Dataset
+
+The first thing we will do is to analyze the `Pros` and `Cons` text reviews in the `dat_gd` dataset to just have a glimpse of what employees (past and present) are feeling about IBM.
+
+#### Pros
+
+Analyzing the `Pros`:
+
+```{r singleword_pros, message=FALSE}
+dat_gd %>% 
+  unnest_tokens(input=Pros, output=word) %>% 
+  anti_join(stop_words) %>% 
+  count(word, sort=TRUE)
+
+# Visualizing top 10 most common words in Pros
+dat_gd %>% 
+  unnest_tokens(input=Pros, output=word) %>% 
+  anti_join(stop_words) %>% 
+  count(word, sort=TRUE) %>% 
+  slice(1:10) %>% 
+  ggplot() + geom_bar(aes(x=reorder(word, -n), y=n), stat="identity", fill="#40B5AD") +
+  theme_classic() +
+  labs(title = "Top 10 Single Words in Pros",
+       caption = "Data Source: Glassdoor") +
+  theme(axis.title.x=element_blank())
+```
+
+```{r bigrams_pros, message=FALSE}
+# Visualizing top 30 bigrams in Pros
+dat_gd %>% 
+  unnest_tokens(input=Pros, output=word, token="ngrams", n=2) %>% 
+  separate(word, c("word1", "word2"), sep=" ") %>% 
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  unite(word, word1, word2, sep=" ") %>% 
+  count(word, sort=TRUE) %>% 
+  slice(1:30) %>% 
+  ggplot() + geom_bar(aes(x=reorder(word, n), y=n), stat = "identity", fill = "#40B5AD") +
+  theme_classic() +
+  coord_flip() +
+  labs(title = "Top 30 Bi-Words in Pros",
+       caption = "Data Source: Glassdoor") +
+  theme(axis.title.y=element_blank())
+```
+
+#### Cons
+
+Analyzing the `Cons`:
+
+```{r singleword_cons, message=FALSE}
+dat_gd %>% 
+  unnest_tokens(input=Cons, output=word) %>% 
+  anti_join(stop_words) %>% 
+  count(word, sort=TRUE)
+
+# Visualizing top 10 most common words in Cons
+dat_gd %>% 
+  unnest_tokens(input=Cons, output=word) %>% 
+  anti_join(stop_words) %>% 
+  count(word, sort=TRUE) %>% 
+  slice(1:10) %>% 
+  ggplot() + geom_bar(aes(x=reorder(word, -n), y=n), stat="identity", fill="#de5833") +
+  theme_classic() +
+  labs(title = "Top 10 Single Words in Cons",
+       caption = "Data Source: Glassdoor") +
+  theme(axis.title.x=element_blank())
+```
+
+```{r bigrams_cons, message=FALSE}
+# Visualizing top 30 bigrams in Cons
+dat_gd %>% 
+  unnest_tokens(input=Cons, output=word, token="ngrams", n=2) %>% 
+  separate(word, c("word1", "word2"), sep=" ") %>% 
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  unite(word, word1, word2, sep=" ") %>% 
+  count(word, sort=TRUE) %>% 
+  slice(1:30) %>% 
+  ggplot() + geom_bar(aes(x=reorder(word, n), y=n), stat = "identity", fill = "#de5833") +
+  theme_classic() +
+  coord_flip() +
+  labs(title = "Top 30 Bi-Words in Cons",
+       caption = "Data Source: Glassdoor") +
+  theme(axis.title.y=element_blank())
+```
+
+## Sentiment Analysis on Glassdoor Reviews
+
+In the Glassdoor reviews, there are two columns of text data called `Pros` and `Cons` -- one for positive reviews and one for negative reviews. The idea here is to compute the sentiment scores and to use them as inputs to the prediction model that would predict attrition at IBM. We want to explore whether the sentiments in the Glassdoor reviews would better predict attrition at IBM.
+
+### Renaming Roles in Glassdoor Dataset
+
+Before any sentiment analysis can be done, we need to categorize the `Role` column of the `dat_gd` dataset into a smaller group of categories as there are myriad type of roles that were written in the text reviews, which would make it difficult to perform any sort of summary statistic and joining of data with the `dat_hr` dataset. The goal is to have an aggregated/averaged sentiment score for each job category based on the text reviews. Eventually, we grouped all roles based on 6 distinct job categories (shown below) because they have distinct career ladder paths from each other, and within each job category, they would have similarities such as pay and education backgrounds, among other things.      
+
+The 6 job categories are:
+
+* **AESP (Assistant Engineering & Scientific Personnel)**: E.g., Lab Technicians, Technical Support/Specialists, etc.
+* **Corporate**: E.g., Admin Executive, Procurement, Human Resources, Business Partners, etc.
+* **Director**: E.g., Vice President, Senior Vice President, Chief Technology Offier, etc.
+* **ESP (Engineering & Scientific Personnel)**: E.g., Data Scientists, Engineers, Member of Technical Staff, Programmers, etc.
+* **Manager**: E.g., Team Leads, Project Managers, Service Delivery Managers, etc.
+* **Sales**: E.g., Sales Support, Client Representative, Account Representative, etc.
+
+However, while performing the re-categorization exercise, there were roles that were ambiguous and needed manual research in order to determine which category it belonged to. For instance, there were roles such as "sdm" and "rsm", to which we used Glassdoor's website to understand what the individual job descriptions were before assigning them into the appropriate categories ("sdm" and "rsm" are the abbreviations for service delivery manager and real storage manager respectively).
+
+```{r rename_gd, echo=TRUE}
+# Convert all roles to lowercase
+dat_gd$Role <- tolower(dat_gd$Role)
+
+# Rename all roles into standard role types
+dat_gd_newroles <- dat_gd %>%
+  mutate(Role  = case_when(
+    str_detect(Role, "manager") ~ "Manager",
+    str_detect(Role, "bdm") ~ "Manager",
+    str_detect(Role, "director") ~ "Director",
+    str_detect(Role, "engineer") ~ "ESP",
+    str_detect(Role, "developer") ~ "ESP",
+    str_detect(Role, "analyst") ~ "ESP",
+    str_detect(Role, "programmer") ~ "ESP",
+    str_detect(Role, "architect") ~ "ESP",
+    str_detect(Role, "scientist") ~ "ESP",
+    str_detect(Role, "data science") ~ "ESP",
+    str_detect(Role, "data scientist") ~ "ESP",
+    str_detect(Role, "data scentist") ~ "ESP",
+    str_detect(Role, "senior technical staff member") ~ "ESP",
+    str_detect(Role, "researcher") ~ "ESP",
+    str_detect(Role, "design") ~ "ESP",
+    str_detect(Role, "sales") ~ "Sales",
+    str_detect(Role, "talent") ~ "Corporate",
+    str_detect(Role, "hr") ~ "Corporate",
+    str_detect(Role, "human") ~ "Corporate",
+    str_detect(Role, "executive") ~ "Corporate",
+    str_detect(Role, "partner") ~ "Corporate",
+    str_detect(Role, "accountant") ~ "Corporate",
+    str_detect(Role, "technician") ~ "AESP",
+    str_detect(Role, "specialist") ~ "AESP",
+    str_detect(Role, "senior") ~ "Manager",
+    str_detect(Role, "managing") ~ "Manager",
+    str_detect(Role, "consultant") ~ "Corporate",
+    str_detect(Role, "admin") ~ "Corporate",
+    str_detect(Role, "vice pres") ~ "Director",
+    str_detect(Role, "svp") ~ "Director",
+    str_detect(Role, "research") ~ "ESP",
+    str_detect(Role, "lead") ~ "Manager",
+    str_detect(Role, "writer") ~ "Corporate",
+    str_detect(Role, "chief") ~ "Director",
+    str_detect(Role, "tech") ~ "AESP",
+    str_detect(Role, "client rep") ~ "Sales",
+    str_detect(Role, "service rep") ~ "Sales",
+    str_detect(Role, "account rep") ~ "Sales",
+    str_detect(Role, "support serv") ~ "Sales",
+    str_detect(Role, "acquisition") ~ "Corporate",
+    str_detect(Role, "president") ~ "Director",
+    str_detect(Role, "legal") ~ "Corporate",
+    str_detect(Role, "business") ~ "Corporate",
+    str_detect(Role, "manage") ~ "Manager",
+    str_detect(Role, "product") ~ "Manager",
+    str_detect(Role, "procurement") ~ "Corporate",
+    str_detect(Role, "market") ~ "Corporate",
+    str_detect(Role, "finance") ~ "Corporate",
+    str_detect(Role, "people") ~ "Corporate",
+    str_detect(Role, "rep") ~ "Corporate",
+    str_detect(Role, "dev") ~ "ESP",
+    str_detect(Role, "agent") ~ "Corporate",
+    str_detect(Role, "bdr") ~ "Corporate",
+    str_detect(Role, "quality") ~ "AESP",
+    str_detect(Role, "support") ~ "AESP",
+    str_detect(Role, "attorney") ~ "Corporate",
+    str_detect(Role, "social") ~ "Corporate",
+    str_detect(Role, "relations") ~ "Corporate",
+    str_detect(Role, "content") ~ "Corporate",
+    str_detect(Role, "hardware") ~ "AESP",
+    str_detect(Role, "scrum") ~ "Corporate",
+    str_detect(Role, "sdm") ~ "Manager",
+    str_detect(Role, "rsm") ~ "Manager",
+    TRUE ~ Role
+  ))
+
+# Discard all other rows that do not have well defined roles
+dat_gd_filtered <- dat_gd_newroles %>%
+  filter(Role == "ESP" | Role == "Manager" | Role == "Corporate" |
+           Role == "Sales" | Role == "AESP" | Role == "Director")
+
+# Convert Role to factor
+dat_gd_filtered$Role <- as.factor(dat_gd_filtered$Role)
+```
+
+Ensure that the roles have 6 distinct categories and explore the distribution.
+
+```{r levels, echo=T}
+levels(dat_gd_filtered$Role)
+summary(dat_gd_filtered$Role)
+```
+
+### Conduct Sentiment Analysis
+
+For the sentiment analysis, we use the `sentimentr` library as it handles valence shifters (i.e., negators amplifiers, de-amplifiers and adversative conjunctions) while maintaining speed (an alternative is the `qdap` library, but it is slower in speed). Another reason is because the library gives us the option to aggregate the sentiment scores by grouping variables, which is something that we want to do (i.e., we want to group it by the job roles).
+
+Here we computed the average sentiment scores for the `Pros` in the text reviews and we visualized them in a density plot for easy viewing.
+
+```{r sentimentanalysis_pros, echo=TRUE, message=F}
+## Pros
+# Avg sentiment scores summarized by Role
+dat_gd_avgsentiment_pros <- dat_gd_filtered %>%
+  select(-Cons) %>%
+  get_sentences() %>%
+  sentiment_by("Role")
+
+dat_gd_avgsentiment_pros
+
+# Sentiment scores of Pros reviews faceted by Role
+dat_gd_filtered %>%
+  select(-Cons) %>%
+  get_sentences() %>%
+  sentiment() %>%
+  group_by(element_id, Role) %>%
+  summarise(avg_sentiment = mean(sentiment)) %>%
+  ungroup() %>%
+  left_join(dat_gd_avgsentiment_pros, by="Role") %>%
+  ggplot(aes(x=avg_sentiment, fill=Role)) +
+  geom_density(alpha=0.6) +
+  facet_wrap(~Role) +
+  geom_vline(aes(xintercept=ave_sentiment), size=1, color="red") +
+  geom_text(aes(x=ave_sentiment+0.6, label=paste0("Mean\n",round(ave_sentiment,3)), y=1.2)) +
+  ggtitle("Distribution of Sentiment Scores for Reviews in Pros") +
+  labs(x="Sentiment Score", y="Density") +
+  theme_classic()
+```
+
+
+Now we compute the average sentiment scores for the `Cons` in the text reviews and we visualize them in a density plot.
+
+```{r sentimentanalysis_cons, echo=TRUE, message=F}
+## Cons
+# Avg sentiment scores summarized by Role
+dat_gd_avgsentiment_cons <- dat_gd_filtered %>%
+  select(-Pros) %>%
+  get_sentences() %>%
+  sentiment_by("Role")
+
+dat_gd_avgsentiment_cons
+
+# Sentiment scores of Cons reviews faceted by Role
+dat_gd_filtered %>%
+  select(-Pros) %>%
+  get_sentences() %>%
+  sentiment() %>%
+  group_by(element_id, Role) %>%
+  summarise(avg_sentiment = mean(sentiment)) %>%
+  ungroup() %>%
+  left_join(dat_gd_avgsentiment_cons, by="Role") %>%
+  ggplot(aes(x=avg_sentiment, fill=Role)) +
+  geom_density(alpha=0.6) +
+  facet_wrap(~Role) +
+  geom_vline(aes(xintercept=ave_sentiment), size=1, color="red") +
+  geom_text(aes(x=ave_sentiment+0.6, label=paste0("Mean\n",round(ave_sentiment,3)), y=1.2)) +
+  ggtitle("Distribution of Sentiment Scores for Reviews in Cons") +
+  labs(x="Sentiment Score", y="Density") +
+  theme_classic()
+```
+
+As you can see from the distribution, the average sentiment scores from the `Pros` resulted in a more positive polarity while the `Cons` resulted in a less positive polarity relative to each other, which is anecdotally expected. These sentiment scores will subsequently be used as inputs to the prediction model in the later steps.
+
+## Join Both Datasets
+
+With the amalgamation of the roles in the Glassdoor reviews into 6 distinct categories, we shall do the same for the IBM dataset, `dat_hr`, and attempt to join the sentiment scores to it for prediction modeling purposes.
+
+### Renaming Roles in IBM Dataset
+
+First, we performed the re-categorization of the job roles in the IBM dataset. This re-categorization work was definitely easier and more trivial as compared to Glassdoor reviews because the data had distinct job role categories to begin with.
+
+```{r rename_ibm, echo=TRUE}
+# Convert JobRole from factor to character
+dat_hr$JobRole <- as.character(dat_hr$JobRole)
+
+# Rename all roles into standard role types
+dat_hr_newroles <- dat_hr %>%
+  mutate(JobRole = case_when(
+    str_detect(JobRole, "Sales Executive") ~ "Sales",
+    str_detect(JobRole, "Research Scientist") ~ "ESP",
+    str_detect(JobRole, "Laboratory Technician") ~ "AESP",
+    str_detect(JobRole, "Manufacturing Director") ~ "Director",
+    str_detect(JobRole, "Healthcare Representative") ~ "Corporate",
+    str_detect(JobRole, "Sales Representative") ~ "Sales",
+    str_detect(JobRole, "Research Director") ~ "Director",
+    str_detect(JobRole, "Human Resources") ~ "Corporate",
+    TRUE ~ JobRole
+  ))
+
+# Convert JobRole to factor
+dat_hr_newroles$JobRole <- as.factor(dat_hr_newroles$JobRole)
+
+# Rename JobRole to Role in order to match dat_gd_avgsentiment_pros and cons
+dat_hr_renamed <- dat_hr_newroles %>%
+  rename(Role = JobRole)
+```
+
+Ensure that the roles have 6 distinct categories and explore the distribution.
+
+```{r levels_hr, echo=T}
+levels(dat_hr_renamed$Role)
+summary(dat_hr_renamed$Role)
+```
+
+### Join Sentiment Scores to IBM Dataset
+
+Now that both datasets have a common baseline (i.e., job roles) for joining, we did a `left_join` to merge the sentiments scores for `Pros` and `Cons` into the IBM dataset. The sentiment scores are appended in the last two columns of `dat_hr_final`.
+
+```{r join_senti_scores, echo=T}
+# dat_gd_avgsentiment_pros joined to dat_hr_renamed
+dat_hr_final <- dat_hr_renamed %>%
+  left_join(dat_gd_avgsentiment_pros, by="Role") %>%
+  select(-word_count, -sd) %>%
+  rename(ave_sentiment_pros = ave_sentiment) %>%
+  left_join(dat_gd_avgsentiment_cons, by="Role") %>%
+  select(-word_count, -sd) %>%
+  rename(ave_sentiment_cons = ave_sentiment)
+
+glimpse(dat_hr_final)
+```
+
+## Predicting Attrition
+
+In this section, we perform the modeling process for predicting attrition at IBM. We shall use inputs from the default IBM dataset together with clustering and supplemental data from the Glassdoor reviews. The prediction modeling methodology is as follows:
+
+1. Model a baseline logistic regression with original IBM dataset predictors. Use backward selection to identify the best model.
+2. Conduct a variance inflation factor (VIF) test to check for variables with high multicolliearity. Drop selected variables if necessary.
+3. Model a logistic regression model with sentiment scores added into the model. Make an assessment if it improves the prediction accuracy.
+4. Perform clustering with the original IBM dataset before using the clusters as inputs to the model. Make an assessment if it improves the prediction accuracy.
+5. Incorporate both sentiment scores and clustering results as inputs to the model. Make and assessment if it improves the prediction accuracy.
+6. Try other prediction models such as trees to see how it performs against logistic regression.
+
+Since we are attempting to predict attrition, this becomes a classification problem (i.e., "will this employee leave?") and we will use confusion matrices to compute the accuracy, specificity and sensitivity figures.
+
+The main aim of this project is to reduce the attrition at IBM; in our business context, we want to focus on the **false negatives (FN)** as opposed to the false positives (FP). Why?
+
+* **FP**: Predicting that an employee **would leave** but he/she **did not**.
+* **FN**: Predicting that an employee **would not leave** but he/she **did**.
+
+Under a FP case, we predict that an employee **would leave** (Attrition=Yes) but he/she **did not**. This would mean that the company would have taken additional measures to prevent this employee from leaving, leading to a "wastage" of resources. But this might not be a bad thing because in the process of doing so, the company would have forged a stronger relationship with the employee, which might further reduce the chance of the employee from leaving.
+
+However, under a FN case, we predict that an employee **would not leave** (Attrition=No) but he/she **did leave**. This is more detrimental to the company because it means that we have failed to take preventive action to prevent attrition, thereby losing valuable talents in IBM. For this reason, the priority is in reducing the FN in our prediction models. Hence, the **crucial metric in our business context is the sensitivity figure** because we want to reduce FN, which is in the denominator of the equation, as shown below.
+
+$$ Sensitivity = TP/(TP+FN) $$
+$$ Specificity = TN/(TN+FP) $$
+$$ Accuracy = (TN+TP)/(TN+TP+FN+FP) $$
+
+Lastly, we will use the area under the curve (AUC) as a measure of the model quality. The higher the AUC, the better the model.
+
+### Split Data
+
+```{r split_data, echo=T}
+# Split data
+set.seed(1000)
+split <- createDataPartition(dat_hr_final$Attrition, p=0.7, list=F, groups=100)
+train <- dat_hr_final[split,]
+test <- dat_hr_final[-split,]
+```
+
+### Model 1: Logistic Regression with Backward Selection
+
+We model a logistic regression with the original predictors from the IBM dataset first (without sentiment scores and clustering). We used backward selection for feature selection. 
+
+```{r logmodel, echo=T}
+model1 <- glm(Attrition~., family="binomial", data=train[,1:32])
+summary(model1)
+```
+
+```{r logmodel_bw, echo=T, results='hide'}
+# Backward selection
+start_mod <- glm(Attrition~., family="binomial", data=train[,1:32])
+empty_mod <- glm(Attrition~1, family="binomial", data=train[,1:32])
+full_mod <- glm(Attrition~., family="binomial", data=train[,1:32])
+model_bw <- step(start_mod,
+                 scope=list(upper=full_mod, lower=empty_mod),
+                 direction="backward")
+```
+
+We check the VIF of the logistic regression model and realized that `JobLevel` has high VIF. We will drop `JobLevel` from the model and check the VIF once more to ensure that the variables are not multicollinear.
+
+```{r logmodel_bw2, echo=T}
+# Check VIF
+vif(model_bw)
+
+# Drop highest VIF (JobLevel)
+model_bw <- glm(Attrition~Age+BusinessTravel+DailyRate+Department+
+                  DistanceFromHome+EnvironmentSatisfaction+Gender+
+                  JobInvolvement+JobSatisfaction+MonthlyIncome+
+                  NumCompaniesWorked+OverTime+PercentSalaryHike+
+                  RelationshipSatisfaction+StockOptionLevel+
+                  TotalWorkingYears+TrainingTimesLastYear+
+                  WorkLifeBalance+YearsSinceLastPromotion+
+                  YearsWithCurrManager, family="binomial", data=train[,1:32])
+
+# Check VIF once more
+vif(model_bw)
+```
+
+Now that the VIF is good, we performed the predictions with with a 0.5 threshold.
+
+```{r logmodel_pred, echo=T}
+# Predict
+pred <- predict(model_bw, newdata=test[,1:32], "response")
+ct <- table(attrition = test$Attrition,
+            predictions = as.integer(pred>0.5))
+ct
+accuracy_df <- data.frame(accuracy = sum(ct[1,1],ct[2,2])/nrow(test),
+                          specificity = ct[1,1]/sum(ct[1,1],ct[1,2]),
+                          sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2]))
+accuracy_df
+```
+
+Next, we plot the AUC to determine the optimal threshold value. From the chart, it seems that a threshold of 0.2 is good.
+
+```{r logmodel_auc, echo=T}
+# Plot AUC
+ROCRpred <- prediction(pred, test$Attrition)
+ROCRperf <- performance(ROCRpred, "acc", "fnr")
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7)) 
+as.numeric(performance(ROCRpred,"auc")@y.values)
+
+# Use 0.2 as threshold
+ct_0.2 <- table(attrition = test$Attrition,
+                predictions = as.integer(pred>0.2))
+ct_0.2
+accuracy_df_0.2 <- data.frame(accuracy = sum(ct_0.2[1,1],ct_0.2[2,2])/nrow(test),
+                              specificity = ct_0.2[1,1]/sum(ct_0.2[1,1],ct_0.2[1,2]),
+                              sensitivity = ct_0.2[2,2]/sum(ct_0.2[2,1],ct_0.2[2,2]))
+accuracy_df_0.2
+```
+
+### Model 2: Logistic Regression with Sentiment Scores (Pros)
+
+Next, we perform the same logistic regression as Model #1, but we add the sentiment scores for the `Pros` as a predictor into the model. The main aim is to observe if there is an improvement to the prediction. We check the VIF again just to ensure that there is no multicollinearity.
+
+```{r logmodel_pros, echo=T}
+# Logistic regression
+model_senti <- glm(Attrition~Age+BusinessTravel+DailyRate+Department+
+                  DistanceFromHome+EnvironmentSatisfaction+Gender+
+                  JobInvolvement+JobSatisfaction+MonthlyIncome+
+                  NumCompaniesWorked+OverTime+PercentSalaryHike+
+                  RelationshipSatisfaction+StockOptionLevel+
+                  TotalWorkingYears+TrainingTimesLastYear+
+                  WorkLifeBalance+YearsSinceLastPromotion+
+                  YearsWithCurrManager+ave_sentiment_pros, 
+                  family="binomial", data=train)
+
+# Check the VIF
+vif(model_senti) 
+```
+
+We now predict the results with a threshold of 0.5.
+
+```{r pred_senti, echo=T}
+# Predict
+pred_senti <- predict(model_senti, newdata=test, "response")
+ct_senti <- table(attrition = test$Attrition,
+                  predictions = as.integer(pred_senti>0.5))
+ct_senti
+accuracy_senti_df <- data.frame(accuracy = sum(ct_senti[1,1],ct_senti[2,2])/nrow(test),
+                                specificity = ct_senti[1,1]/sum(ct_senti[1,1],ct_senti[1,2]),
+                                sensitivity = ct_senti[2,2]/sum(ct_senti[2,1],ct_senti[2,2]))
+accuracy_senti_df
+```
+
+We plot the AUC curve to determine the optimal threshold value. Based on the plot, the optimal threshold value should be 0.24.
+
+```{r auc_predsenti, echo=T}
+# Plot AUC
+ROCRpred_senti <- prediction(pred_senti, test$Attrition)
+ROCRperf_senti <- performance(ROCRpred_senti, "acc", "fnr")
+plot(ROCRperf_senti, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7)) 
+as.numeric(performance(ROCRpred_senti,"auc")@y.values) 
+
+# Use 0.24 as threshold
+ct_senti_0.24 <- table(attrition = test$Attrition,
+                       predictions = as.integer(pred_senti>0.24))
+ct_senti_0.24
+accuracy_senti_0.24 <- data.frame(
+  accuracy = sum(ct_senti_0.24[1,1],ct_senti_0.24[2,2])/nrow(test),
+  specificity = ct_senti_0.24[1,1]/sum(ct_senti_0.24[1,1],ct_senti_0.24[1,2]),
+  sensitivity = ct_senti_0.24[2,2]/sum(ct_senti_0.24[2,1],ct_senti_0.24[2,2]))
+accuracy_senti_0.24
+```
+
+### Model 3: Logistic Regression with Sentiment Scores (Cons)
+
+Next, we perform the same logistic regression as Model #1, but we add the sentiment scores for the `Cons` as a predictor into the model. The main aim is to observe if there is an improvement to the prediction. We check the VIF again just to ensure that there is no multicollinearity.
+
+```{r logmodel_cons, echo=T}
+# Logistic regression
+model_senti2 <- glm(Attrition~Age+BusinessTravel+DailyRate+Department+
+                     DistanceFromHome+EnvironmentSatisfaction+Gender+
+                     JobInvolvement+JobSatisfaction+MonthlyIncome+
+                     NumCompaniesWorked+OverTime+PercentSalaryHike+
+                     RelationshipSatisfaction+StockOptionLevel+
+                     TotalWorkingYears+TrainingTimesLastYear+
+                     WorkLifeBalance+YearsSinceLastPromotion+
+                     YearsWithCurrManager+ave_sentiment_cons, 
+                   family="binomial", data=train)
+
+# Check the VIF
+vif(model_senti2) 
+```
+
+We now predict the results with a threshold of 0.5.
+
+```{r pred_senti2, echo=T}
+# Predict
+pred_senti2 <- predict(model_senti2, newdata=test, "response")
+ct_senti2 <- table(attrition = test$Attrition,
+                   predictions = as.integer(pred_senti2>0.5))
+ct_senti2
+accuracy_senti2_df <- data.frame(accuracy = sum(ct_senti2[1,1],ct_senti2[2,2])/nrow(test),
+                                 specificity = ct_senti2[1,1]/sum(ct_senti2[1,1],ct_senti2[1,2]),
+                                 sensitivity = ct_senti2[2,2]/sum(ct_senti2[2,1],ct_senti2[2,2]))
+accuracy_senti2_df
+```
+
+We plot the AUC curve to determine the optimal threshold value. Based on the plot, the optimal threshold is 0.245.
+
+```{r auc_predsenti2, echo=T}
+# Plot AUC
+ROCRpred_senti2 <- prediction(pred_senti2, test$Attrition)
+ROCRperf_senti2 <- performance(ROCRpred_senti2, "acc", "fnr")
+plot(ROCRperf_senti2, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7)) 
+as.numeric(performance(ROCRpred_senti2,"auc")@y.values) 
+
+# Use 0.245 as threshold
+ct_senti2_0.245 <- table(attrition = test$Attrition,
+                         predictions = as.integer(pred_senti2>0.245))
+ct_senti2_0.245
+accuracy_senti2_0.245 <- data.frame(
+  accuracy = sum(ct_senti2_0.245[1,1],ct_senti2_0.245[2,2])/nrow(test),
+  specificity = ct_senti2_0.245[1,1]/sum(ct_senti2_0.245[1,1],ct_senti2_0.245[1,2]),
+  sensitivity = ct_senti2_0.245[2,2]/sum(ct_senti2_0.245[2,1],ct_senti2_0.245[2,2]))
+accuracy_senti2_0.245
+```
+
+### Model 4: Logistic Regression with Clustering
+
+Next, before we perform any modeling, we will perform clustering to the IBM dataset first. We do so by using the correlation funnel to determine the variables that are highly correlated with `Attrition` in order to perform the clustering analysis.
+
+```{r clustering, echo=T, warning=F}
+# Binarize continuous variables and one hot encode factors
+corr_tbl  <- dat_hr %>%
+  select(-EmployeeNumber) %>%
+  binarize(n_bins=5, thresh_infreq=0.01, name_infreq="OTHER", one_hot=T) %>%
+  correlate(Attrition__Yes)
+
+# Plot correlation funnel
+corr_tbl %>%
+  plot_correlation_funnel() %>%
+  ggplotly()
+```
+
+As can be seen from the correlation funnel, the following variables were highly correlated with the outcome variable: `Overtime`, `JobLevel`, `MonthlyIncome`, `YearsAtCompany`, `StockOptionLevel`, `YearsWithCurrManager`, `TotalWorkingYears`, `MaritalStatus`, `Age`, `YearsInCurrentRole`, `JobRole`, `EnvironmentSatisfaction`, `JobInvolvement` and `BusinessTravel`. Therefore, we use them for the clustering analysis. We add in `EmployeeNumber` to the variable selection as well as a means to index the data.
+
+```{r clust_var, echo=T}
+# Select top correlated variables for analysis
+var_selection <- c("EmployeeNumber", "Attrition", "OverTime", "JobLevel", 
+                   "MonthlyIncome", "YearsAtCompany", "StockOptionLevel",
+                   "YearsWithCurrManager", "TotalWorkingYears", "MaritalStatus",
+                   "Age", "YearsInCurrentRole", "JobRole", "EnvironmentSatisfaction",
+                   "JobInvolvement", "BusinessTravel")
+
+dat_hr_subset <- dat_hr %>%
+  select(one_of(var_selection)) %>%
+  mutate_if(is.character, as.factor)
+```
+
+Finally, we perform the clustering analysis to determine how similar each employees are to each other. If our variables are of numeric (continuous) nature, we could use the Euclidean Distance as a way for computation. However, our dataset consists of both continuous and ordinal types, which would require other techniques for analysis. Based on some research, we discovered that the Gower Distance is able to handle both data types, therefore, we use it for the analysis. Here we compute a distance matrix that compares each employee to every other employee in the data.
+
+```{r clust_analysis, echo=T}
+# Use Gower distance to handle both numeric and factor types
+gower_dist <- daisy(dat_hr_subset[,2:13], metric="gower")
+gower_mat <- as.matrix(gower_dist)
+```
+
+Just for a sanity check, we view the most similar employees based on the distance score to ensure that the Gower Distance is working fine. Based on the results, Employee #1272 and Employee #371 are most similar to each other because they match on most of the variables -- they had similar monthly incomes, worked the same number of years at IBM, etc.
+
+```{r clust_test, echo=T}
+# View most similar employees to test Gower distance
+similar_tbl <- dat_hr_subset[which(gower_mat==min(gower_mat[gower_mat!=min(gower_mat)]), 
+                                   arr.ind=T)[1,],]
+similar_tbl
+```
+
+To determine the optimal number of clusters to segment the data, we use the silhouette plot. As shown below, we select the 7-cluster solution due to the highest average silhouette width at 7.
+
+```{r silplot, echo=T}
+# Choose number of clusters using silhouette plot
+silhouette_width <- sapply(2:10, FUN=function(x){
+  pam(x=gower_dist, k=x)$silinfo$avg.width
+})
+
+ggplot(data=data.frame(cluster = 2:10,silhouette_width),aes(x=cluster,y=silhouette_width))+
+  geom_line(col='steelblue',size=1.2)+
+  geom_point()+
+  scale_x_continuous(breaks=seq(2,10,1)) # choose 7 clusters soln
+```
+
+For the analysis, we use the Partitioning Around Mediods (PAM) method because it is less sensitive to outliers in the data (e.g., high salary income) and it provides an exemplary case for each cluster (i.e., medoid), which would be very helpful for us to personify the type of employees that have a high chance of leaving IBM. 
+
+Now we run the cluster analysis with 7 clusters and join the cluster membership with the IBM dataset.
+
+```{r pam, echo=T}
+# Perform clustering using PAM
+k <- 7
+pam_fit <- pam(gower_dist, diss=T, k)
+
+# Add cluster assignments to each employee
+dat_hr_clusters <- dat_hr_subset %>%
+  mutate(cluster=pam_fit$clustering)
+```
+
+We now look at each medoid to understand the demography of each cluster. This shows the exemplary employee representing each cluster. It is obvious that Employee #991 is the model type of employee that would best represent those who left IBM (this is the only row that has `Attrition=Yes`).
+
+```{r pam_med, echo=T}
+# Look at medoids to understand each cluster
+dat_hr_clusters[pam_fit$medoids,]
+```
+
+To better understand the attrition in the population, we computed the attrition in each cluster and how much each cluster captures overall attrition in the entire population. As seen below, approximately 88% of employees in Cluster #3 left IBM and that represents about 52% of all attrition in the entire population.
+
+```{r pam_attritionrate, echo=T}
+# Group by attrition rate
+attrition_rate_tbl <- dat_hr_clusters %>%
+  select(cluster, Attrition) %>%
+  mutate(attrition_num = fct_relevel(Attrition, "No", "Yes") %>% as.numeric()-1) %>%
+  group_by(cluster) %>%
+  summarise(
+    Cluster_Turnover_Rate = (sum(attrition_num)/length(attrition_num))*100,
+    Turnover_Count = sum(attrition_num),
+    Cluster_Size = length(attrition_num)
+  ) %>%
+  ungroup() %>%
+  mutate(Population_Turnover_Rate = (Turnover_Count/sum(Turnover_Count))*100)
+
+attrition_rate_tbl
+```
+
+We are now ready to use the cluster membership results as an input to the prediction model. Here we append the results to the IBM data, split the data and perform the logistic regression based on the same inputs as Model #1, but with the added clustering results.
+
+```{r clust_pred, echo=T}
+# Merge clusters with IBM HR data
+dat_hr_full <- dat_hr_final %>%
+  mutate(cluster=pam_fit$clustering)
+
+# Split data
+set.seed(1000)
+split2 <- createDataPartition(dat_hr_full$Attrition, p=0.7, list=F, groups=100)
+train2 <- dat_hr_full[split2,]
+test2 <- dat_hr_full[-split2,]
+
+# Logistic regression
+model_clust <- glm(Attrition~Age+BusinessTravel+DailyRate+Department+
+                     DistanceFromHome+EnvironmentSatisfaction+Gender+
+                     JobInvolvement+JobSatisfaction+MonthlyIncome+
+                     NumCompaniesWorked+OverTime+PercentSalaryHike+
+                     RelationshipSatisfaction+StockOptionLevel+
+                     TotalWorkingYears+TrainingTimesLastYear+
+                     WorkLifeBalance+YearsSinceLastPromotion+
+                     YearsWithCurrManager+cluster, 
+                   family="binomial", data=train2)
+```
+
+We now predict the results with a threshold of 0.5.
+
+```{r pred_clust, echo=T}
+# Predict
+pred_clust <- predict(model_clust, newdata=test2, "response")
+ct_clust <- table(attrition = test2$Attrition,
+                  predictions = as.integer(pred_clust>0.5))
+ct_clust
+accuracy_clust_df <- data.frame(accuracy = sum(ct_clust[1,1],ct_clust[2,2])/nrow(test2),
+                                specificity = ct_clust[1,1]/sum(ct_clust[1,1],ct_clust[1,2]),
+                                sensitivity = ct_clust[2,2]/sum(ct_clust[2,1],ct_clust[2,2]))
+accuracy_clust_df
+```
+
+We plot the AUC curve to determine the optimal threshold value. Based on the plot, the optimal threshold is 0.22.
+
+```{r auc_predclust, echo=T}
+# Plot AUC
+ROCRpred_clust <- prediction(pred_clust, test2$Attrition)
+ROCRperf_clust <- performance(ROCRpred_clust, "acc", "fnr")
+plot(ROCRperf_clust, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+as.numeric(performance(ROCRpred_clust,"auc")@y.values)
+
+# Use 0.22 as threshold
+ct_clust_0.22 <- table(attrition = test2$Attrition,
+                       predictions = as.integer(pred_clust>0.22))
+ct_clust_0.22
+accuracy_clust_0.22 <- data.frame(
+  accuracy = sum(ct_clust_0.22[1,1],ct_clust_0.22[2,2])/nrow(test2),
+  specificity = ct_clust_0.22[1,1]/sum(ct_clust_0.22[1,1],ct_clust_0.22[1,2]),
+  sensitivity = ct_clust_0.22[2,2]/sum(ct_clust_0.22[2,1],ct_clust_0.22[2,2]))
+accuracy_clust_0.22
+```
+
+### Model 5: Logistic Regression with both Sentiment Scores and Clustering
+
+Since we have already modeled a few different logistic regression models using sentiment scores and cluster memberships as inputs, it would be interesting to have a model with both sentiment scores and cluster memberships as inputs to the same model and see if it improves the prediction accuracy. We shall use the sentiment scores for `Cons` (instead of `Pros`) in this model since it had a better AUC (compare Model #2 and Model #3).
+
+```{r senti_clustering, echo=T}
+# Logistic regression
+model_clust_senti <- glm(Attrition~Age+BusinessTravel+DailyRate+Department+
+                     DistanceFromHome+EnvironmentSatisfaction+Gender+
+                     JobInvolvement+JobSatisfaction+MonthlyIncome+
+                     NumCompaniesWorked+OverTime+PercentSalaryHike+
+                     RelationshipSatisfaction+StockOptionLevel+
+                     TotalWorkingYears+TrainingTimesLastYear+
+                     WorkLifeBalance+YearsSinceLastPromotion+
+                     YearsWithCurrManager+cluster+ave_sentiment_cons, 
+                   family="binomial", data=train2)
+```
+
+We now predict the results with a threshold of 0.5.
+
+```{r pred_clust_senti}
+# Predict
+pred_clust_senti <- predict(model_clust_senti, newdata=test2, "response")
+ct_clust_senti <- table(attrition = test2$Attrition,
+                        predictions = as.integer(pred_clust_senti>0.5))
+ct_clust_senti
+accuracy_clust_senti_df <- data.frame(
+  accuracy = sum(ct_clust_senti[1,1],ct_clust_senti[2,2])/nrow(test2),
+  specificity = ct_clust_senti[1,1]/sum(ct_clust_senti[1,1],ct_clust_senti[1,2]),
+  sensitivity = ct_clust_senti[2,2]/sum(ct_clust_senti[2,1],ct_clust_senti[2,2]))
+accuracy_clust_senti_df
+```
+
+We plot the AUC curve to determine the optimal threshold value. Based on the plot, the optimal threshold is 0.26.
+
+```{r auc_clust_senti, echo=T}
+# Plot AUC
+ROCRpred_clust_senti <- prediction(pred_clust_senti, test2$Attrition)
+ROCRperf_clust_senti <- performance(ROCRpred_clust_senti, "acc", "fnr")
+plot(ROCRperf_clust_senti, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+as.numeric(performance(ROCRpred_clust_senti,"auc")@y.values)
+
+# Use 0.26 as threshold
+ct_clust_senti_0.26 <- table(attrition = test2$Attrition,
+                    predictions = as.integer(pred_clust_senti>0.26))
+ct_clust_senti_0.26
+accuracy_clust_senti_0.26 <- data.frame(
+  accuracy = sum(ct_clust_senti_0.26[1,1],ct_clust_senti_0.26[2,2])/nrow(test2),
+  specificity = ct_clust_senti_0.26[1,1]/sum(ct_clust_senti_0.26[1,1],ct_clust_senti_0.26[1,2]),
+  sensitivity = ct_clust_senti_0.26[2,2]/sum(ct_clust_senti_0.26[2,1],ct_clust_senti_0.26[2,2]))
+accuracy_clust_senti_0.26
+```
+
+### Model 6: Trees with 10-Fold CV
+
+So far we have only tried logistic regression for the prediction model. It would be worthwhile to try the other machine learning models to see if there can be improvements to the model AUC. In this step, we attempted the decision trees using 10-fold cross validation (CV) and we shall compare the results with the baseline model in Model #1 where we used the default variables from the `dat_hr` dataset (we will not include the sentiment scores and cluster memberships into the modeling). This comparison should give us an indication as to which modeling technique is better.
+
+```{r treemodel, echo=T}
+# Model using CV
+trControl = trainControl(method="cv",number=10) #10-fold cross validation
+tuneGrid = expand.grid(.cp=seq(0,0.1,0.001)) 
+
+set.seed(777)
+trainCV = train(Attrition~., 
+                data=train,
+                method="rpart", 
+                trControl=trControl,
+                tuneGrid=tuneGrid)
+
+trainCV$bestTune
+```
+
+We shall use a cp value of 0.02.
+
+```{r tree_cv, echo=T}
+tree_CV <- rpart(Attrition~.,
+               data=train,
+               method="class",
+               control=rpart.control(cp=trainCV$bestTune))
+
+# Predict
+pred_CV = predict(tree_CV, newdata=test, type='class')
+ct_tree = table(attrition = test$Attrition, 
+                predictions = pred_CV)
+ct_tree
+accuracy_tree_df <- data.frame(
+  accuracy = sum(ct_tree[1,1],ct_tree[2,2])/nrow(test),
+  specificity = ct_tree[1,1]/sum(ct_tree[1,1],ct_tree[1,2]),
+  sensitivity = ct_tree[2,2]/sum(ct_tree[2,1],ct_tree[2,2]))
+accuracy_tree_df
+
+# Plot AUC
+pred_tree_auc <- predict(tree_CV, newdata=test, type="prob")
+ROCRpred_tree <- prediction(pred_tree_auc[,2], test$Attrition)
+ROCRperf_tree <- performance(ROCRpred_tree, "acc", "fnr")
+plot(ROCRperf_tree, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7)) 
+as.numeric(performance(ROCRpred_tree,"auc")@y.values) 
+```
+
+## Summary of Results
+
+This is a summary of all the prediction models that were done. Model 5 had the highest AUC and the best sensitivity and accuracy figures. This was the model that incorporated both sentiment scores (cons) and cluster memberships as predictors, which resulted in improvements to the model AUC, accuracy and specificity figures. Our main aim is to maximize sensitivity because we want a low FN rate due to our business context. Model 5 performs the best in all parameters that we are concerned about. Therefore we shall use that model for interpretation of effects and discussion.
+
+Although the decision tree model performed the best in specificity, it was outperformed in sensitivity and AUC (these factors were far more important to our business context). Hence it is clear that we will not be using the tree model.
+
+```{r summary, echo=F}
+rbind(accuracy_df_0.2, accuracy_senti_0.24, accuracy_senti2_0.245,
+      accuracy_clust_0.22, accuracy_clust_senti_0.26, accuracy_tree_df) %>%
+  as.data.frame() %>%
+  dplyr::mutate(model = c(1, 2, 3, 4, 5, 6),
+                description = c("logmod with bw select",
+                                "logmod with senti (pros)",
+                                "logmod with senti (cons)",
+                                "logmod with clust",
+                                "logmod with senti & clust",
+                                "trees with 10-fold cv"),
+                auc = c(as.numeric(performance(ROCRpred,"auc")@y.values),
+                        as.numeric(performance(ROCRpred_senti,"auc")@y.values),
+                        as.numeric(performance(ROCRpred_senti2,"auc")@y.values),
+                        as.numeric(performance(ROCRpred_clust,"auc")@y.values),
+                        as.numeric(performance(ROCRpred_clust_senti,"auc")@y.values),
+                        as.numeric(performance(ROCRpred_tree,"auc")@y.values))) %>%
+  dplyr::select(model:auc, everything())
+```
+
+## Discussion
+
+In this section, we shall discuss the analysis findings in relation to the three (3) research questions outlined in this project.
+
+### Research Qn 1
+
+> 1. *What are the key driving factors influencing attrition the most at IBM?*
+
+We shall use our best model---which happens to be the logistic regression model with sentiment scores and cluster memberships---to understand the key factors that influence attrition at IBM, knowing which would allow us to create specific recommendations and hypotheses to improve the retention rates (e.g., a 5% increase in monthly salary would reduce attrition by 10%). Note: the benefit of using logistic regression is that it is easy to interpret for communication to stakeholders.
+
+As shown in the model summary below, for instance, it can be inferred that working overtime would result in the highest increase in likelihood towards attrition as compared to the other variables (see coefficient of `OverTimeYes`).
+
+```{r mod_clust_senti, echo=T}
+summary(model_clust_senti)
+```
+
+Specifically, there is a `r round(exp(summary(model_clust_senti)$coef[21]),3)` times higher likelihood of an attrition when an employee works overtime as compared to not working overtime (while holding other factors constant). Phrased differently, there is a `r round(100*(exp(summary(model_clust_senti)$coef[21])-1),1)`% increase in likelihood of attrition when an employee works overtime. 
+
+```{r overtime_var, echo=T}
+# How many times is the likelihood of attrition when an employee works overtime?
+exp(summary(model_clust_senti)$coef[21])
+
+# How much more is the likelihood of attrition when an employee works overtime?
+100*(exp(summary(model_clust_senti)$coef[21])-1)
+```
+
+Working overtime is just one of the factors that affect the likelihood of attrition. We want to explore the other factors that also affect attrition. We use the `varImp()` function to see how the model ranks the importance of each variable. Not surprisingly, the model ranks `OverTimeYes` as the one with highest importance because it has the greatest statistical significance relative to other variables.
+
+```{r mode_clust_senti_varimp, echo=T}
+var_imp <- varImp(model_clust_senti) %>%
+  arrange(desc(Overall))
+
+var_imp %>%
+  ggplot(aes(x=reorder(rownames(var_imp),Overall), y=Overall)) +
+  geom_point(color="blue", size=4, alpha=0.6) +
+  geom_segment(aes(x=rownames(var_imp), xend=rownames(var_imp), 
+                   y=0, yend=Overall), color="skyblue") +
+  xlab("Variable") +
+  ylab("Overall Importance") +
+  theme_classic() +
+  coord_flip()
+```
+
+From the plot, we see that `StockOptionLevel1` is the second most important variable in the model, as determined by the low p-value (statistically significant). `StockOptionLevel1` has a model coefficient of `r round(summary(model_clust_senti)$coef[26],3)`, which implies a `r round(exp(summary(model_clust_senti)$coef[26]),3)` times lower likelihood of leaving IBM (`r round(100*(exp(summary(model_clust_senti)$coef[26])-1),1)`%) as compared to not having any stock option at all.
+
+Intuitively speaking, we see that `YearsSinceLastPromotion` holds a high spot on the variable importance chart with a model coefficient of `r round(summary(model_clust_senti)$coef[34],3)`, which implies a `r round(exp(summary(model_clust_senti)$coef[34]),3)` times higher likelihood of leaving IBM for each year that the employee has not been promoted (while holding other factors constant). This makes sense because the longer the employee remains in the same salary grade, he/she may not feel recognized by the organization, leading to a higher chance of leaving.
+
+`JobSatisfaction4` (job satisfaction score of 4) holds a high importance in the model as well with a model coefficient of `r round(summary(model_clust_senti)$coef[18],3)`, which implies a `r round(exp(summary(model_clust_senti)$coef[18]),3)` times lower likelihood of leaving IBM as compared to having a satisfaction score of 1 (while holding other factors constant) (Note: satisfaction scores range from 1 to 4, with 4 indicating that the staff is the most satisfied with the job). This finding agrees with Ghapanchi & Aurum (2011) and Zhang & Feinzig (2016), where having high job satisfaction and happiness would lead to better retention in a company. The same can be said of `RelationshipSatisfaction4` as well. 
+
+It is worthy to note that `NumCompaniesWorked` holds a high spot on the variable importance chart too. The model coefficient of `r round(summary(model_clust_senti)$coef[20],3)` implies a `r round(exp(summary(model_clust_senti)$coef[20]),3)` times higher likelihood of leaving IBM for each company that the employee has worked for in the past (while holding other factors constant). This could suggest the "job-hopping" tendency of people who are not able to commit to a particular job, hence the greater tendency to leave IBM if he/she had many jobs in the past. While that is a plausible hypothesis, it might not be entirely true for employees who belong to the older age category. The reason is because while older employees may have more past jobs as compared to younger workers who just entered the workforce, which should suggest that they have a greater likelihood of leaving IBM, interestingly, older workers had a lower likelihood to leave IBM (see `Age` coefficient in the model) (the lower likelihood of older workers leaving their jobs is also corroborated by the study by Zhang & Feinzig (2016)). Therefore there is room for further research on potential interaction terms between `Age` and `NumCompaniesWorked` for better interpretation of the effects. 
+
+Lastly, we see that `PercentSalaryHike` was ranked the least important/significant in the model. This was an interesting finding because reports by The Dice (2020) and Deloitte (2019) suggest that majority of employees are looking for higher salaries. But this was not reflected in the attrition model. One possible reason could be that salary is a crucial entry requirement into a company, but not a crucial exit criteria. This is also an area for possible further research.
+
+### Research Qn 2
+
+> 2. *Who is likely to leave IBM?*
+
+The best prediction model was able to achieve a sensitivity of 87.3% (recall that we want to reduce the FN for our business context) and accuracy of 90.1% on the test set as shown below. This is by far the best model, which included the sentiment scores (cons) and the cluster memberships.
+
+```{r bestmodel, echo=F}
+as.data.frame(accuracy_clust_senti_0.26) %>%
+  dplyr::mutate(model = 5,
+                description = "logmod with senti & clust",
+                auc = as.numeric(performance(ROCRpred_clust_senti,"auc")@y.values)) %>%
+  dplyr::select(model:auc, everything())
+```
+
+For future work, it might be worthwhile to attempt averaging both sentiments scores for `Pros` and `Cons` to see if it further improves the prediction accuracy. Other methods such as random forest and boosting could be explored as well. Given time and resource constraints in this project and for the ease of interpretation, we went with logistic regression.
+
+### Research Qn 3
+
+> 3. *What is the employee type that has the highest tendency to leave IBM?*
+
+Based on the clustering work, the type of employees that have the highest tendency to leave IBM are the employees that are similar to Employee #991 (Cluster #3). His/her persona is shown in the table below.
+
+```{r employee_type, echo=T}
+dat_hr_clusters[pam_fit$medoids,]
+```
+
+Cluster #3 accounts for approximately 52% of all attrition in IBM and about 88% of employees in this cluster leave. It is evident that more can be done to improve the retention rates in this cluster. In the next section, we will propose some recommendations to improve the retention rate of those in this cluster.
+
+```{r cluster_type, echo=T}
+attrition_rate_tbl
+```
+
+## Recommendations
+
+We shall use the prediction model (Model #5) to make certain recommendations that are amenable to experimentation. Specifically, we will propose recommendations on variables that are within IBM's control to make adjustments (e.g., salary, training opportunities for employees, etc.). On the other hand, variables that are out of IBM's control are like gender, age, total working years, etc.; we will not make recommendations on these variables as they are inherent to the employees. Lastly, for the purpose of keeping it measurable and simple, we shall exclude "indirect" variables such as job satisfaction, environment satisfaction and relationship satisfaction as they require more effort to measure and it involves a summation of many other factors that influences the satisfaction scores.
+
+Based on the model, it suggests that the rescission of overtime culture in IBM can have the potential to reduce the likelihood of attrition by 6 times (while holding all other variables constant). For instance, this means that we can have the potential of reducing the attrition rate in cluster group 3 by 6 times. From a turnover count of 123 out of 140 employees in that cluster, we can expect to see a reduction in attrition to about 21 employees only (reduction of a turnover rate from 87.9% to 14.6%).
+
+However, this hypothesis is only true with the assumption that all other variables are held constant and that the only difference is whether the employee worked overtime. To test this hypothesis (and for purposes of conducting a research experiment), it is imperative to keep the other variables constant as much as possible. In a practical setting, this can be achieved by performing a clustering analysis on existing IBM employees as they would be segmented in accordance to how similar they are to each other (most of the other variables would be similar from employee to employee to some extent), thereby controlling the other variables the best we can. Then, with the other variables being more similar for employees within each cluster, it gives us the opportunity to tweak the attrition variable (i.e., whether the employee would need to work overtime or not) -- this allows us to create a control and treatment group accordingly. Finally, we should conduct the experiment on the cluster that is most similar to cluster group 3 in order to yield the greatest impact.  
+
+In addition to the reviewing of overtime culture in IBM, another recommendation to reduce attrition is to explore giving employees stock options as it can lower the likelihood of turnover by about 69% (while keeping the other variables constant). To test this, we can easily conduct an experiment with a treatment and control group. Briefly, the experiment would involve giving one group of employees stock options while the other group would not have stock options. Similar to the previous recommendation, this experiment can be conducted on employees who are in the cluster that is most similar to cluster group 3.
+
+## Limitations
+
+A limitation in our project is that there is imbalance in the distribution of attrition statuses in our data. For instance, our data has more employees who stayed with IBM as compared to those who left. Such an imbalance would likely result in poorer prediction accuracy in our models. To improve the accuracy in our models, we may need to treat the imbalance in our training data with, say, some upsampling techniques such as the `ovun.sample()` function from the `ROSE` package. This can be explored in future works.
+
+## References
+
+viGlobal. (2018). Tech Industry Battles Cost of High Attrition Rates. viGlobal. https://www.viglobal.com/2018/06/13/tech-industry-battles-highest-attrition-rate-in-the-world-and-its-costly/.
+
+Kochanski, J., & Ledford, G. (2001). “HOW TO KEEP ME”—RETAINING TECHNICAL PROFESSIONALS. Research Technology Management, 44(3), 31-38. Retrieved June 6, 2021, from http://www.jstor.org/stable/24133992.
+
+Alsop, T. (2021). IBM number of employees worldwide from 2000 to 2020. Statista. https://www.statista.com/statistics/265007/number-of-employees-at-ibm-since-2000/
+
+The Build Network. (2014). Try Fixing the Problem Before Replacing It. Inc. https://www.inc.com/the-build-network/turnover-costs.html
+
+Ghapanchi, A. H., Aurum, A. (2011). Antecedents to IT personnel’s intentions to leave: A systematic literature review. Journal of Systems and Software, Volume 84, 238-249. Retrieved February 21, 2021, from https://www.sciencedirect.com/science/article/abs/pii/S0164121210002645?via%3Dihub.
+
+Zhang, H., & Feinzig, S. (2016). Should I stay or should I go? Global insights into employees’ decisions to leave their jobs [White paper]. IBM Smarter Workforce Institute. https://www.ibm.com/downloads/cas/08GZQKL1
+
+The Deloitte Global Millennial Survey: Societal Discord and Technological Transformation Create a “Generation Disrupted”. (2019). Retrieved February 21, 2021, from https://www2.deloitte.com/global/en/pages/about-deloitte/articles/millennialsurvey.html.
+
+The Dice 2020 Tech Salary Report | eBook | Dice Resources. (2020). Retrieved 20 February 2021, from https://techhub.dice.com/Dice-2020-Tech-Salary-Report.html.
+
+Hecker, D. E. (2005). Occupational employment projections to 2014. Retrieved 21 February 2021, from https://www.bls.gov/opub/mlr/2005/11/art5full.pdf.
+
+Lewis, S. (2020). What Is A High Employee Attrition Rate In Tech Industry. DevSkiller - Powerful tool to test developers skills. Retrieved 21 February 2021, from https://devskiller.com/attrition-rate-in-tech/.
+
+
+
+
+[viGlobal, 2018]: https://www.viglobal.com/2018/06/13/tech-industry-battles-highest-attrition-rate-in-the-world-and-its-costly/
+
+[Kochanski & Ledford, 2001]: http://www.jstor.org/stable/24133992
+
+[Ghapanchi & Aurum, 2011]: https://www.sciencedirect.com/science/article/abs/pii/S0164121210002645?via%3Dihub
+
+[Deloitte, 2019]: https://www2.deloitte.com/global/en/pages/about-deloitte/articles/millennialsurvey.html
+
+[The Dice, 2020]: https://techhub.dice.com/Dice-2020-Tech-Salary-Report.html
+
+[Lewis, 2020]: https://devskiller.com/attrition-rate-in-tech/
+
+[Hecker, 2005]: https://www.bls.gov/opub/mlr/2005/11/art5full.pdf
+
+[Swanner, 2017]: https://insights.dice.com/2017/08/22/tech-jobs-last-2-years-study/
+
+[Alsop, 2021]: https://www.statista.com/statistics/265007/number-of-employees-at-ibm-since-2000/
+
+[Zhang & Feinzig, 2016]: https://www.ibm.com/downloads/cas/08GZQKL1
+
+[The Build Network, 2014]: https://www.inc.com/the-build-network/turnover-costs.html
+
+## Appendix
+
+Description of `dat_hr` dataset:
+
+* `Age`: Age of employee
+* `Attrition`: Whether employee has left IBM (Yes/No)
+* `BusinessTravel`: 3 levels: No Travel, Travel Frequently, Travel Rarely
+* `DailyRate`: Daily salary rate
+* `Department`: 3 levels: HR, Sales, R&D
+* `DistanceFromHome`: Distance from work to home
+* `Education`: 1=Below College, 2=College, 3=Bachelor, 4=Master, 5=Doctor
+* `EducationField`: 6 levels: HR, Life Sciences, Marketing, Medical Sciences, Technical, Others
+* `EmployeeCount`: Number of employees
+* `EmployeeNumber`: Employee ID
+* `EnvironmentSatisfaction`: 1=Low, 2=Medium, 3=High, 4=Very High
+* `Gender`: Male/Female
+* `HourlyRate`: Hourly salary
+* `JobInvolvement`: 1=Low, 2=Medium, 3=High, 4=Very High
+* `JobLevel`: Level of job
+* `JobRole`: Healthcare Representative, HR, Lab Technician, Manager, Manufacturing Director, Research Director, Research Scientist, Sales Executive, Sales Representative
+* `JobSatisfaction`: 1=Low, 2=Medium, 3=High, 4=Very High
+* `MaritalStatus`: Single, Married, Divorced
+* `MonthlyIncome`: Monthly salary
+* `MonthlyRate`: Monthly salary rate
+* `NumCompaniesWorked`: Number of companies employee has worked at
+* `Over18`: Whether employee is above 18 (Yes/No)
+* `OverTime`: Whether employee has worked overtime (Yes/No)
+* `PercentSalaryHike`: Percentage increase in salary
+* `PerformanceRating`: Performance rating of employee
+* `RelationshipSatisfaction`: 1=Low, 2=Medium, 3=High, 4=Very High
+* `StandardHours`: Number of hours worked
+* `StockOptionLevel`: Stock option level
+* `TotalWorkingYears`: Total years of working
+* `TrainingTimesLastYear`: Hours spent on training
+* `WorkLifeBalance`: 1=Bad, 2=Good, 3=Better, 4=Best
+* `YearsAtCompany`: Total years of working at IBM
+* `YearsInCurrentRole`: Total years in current role
+* `YearsSinceLastPromotion`: Total years since last promotion
+* `YearsWithCurrManager`: Total years with current manager
+
+Description of `dat_gd` dataset:
+
+* `Ratings`: Review ratings of 1 to 5
+* `Current_Former`: Whether current of former employee of IBM
+* `Employment_Length`: Length of employment at IBM
+* `Title`: Title of Glassdoor reviews
+* `Review_ID`: Review ID
+* `Review_Date`: Date of review
+* `Role`: Job role
+* `Location`: State of employment in the US
+* `Pros`: Text reviews of the pros of working at IBM
+* `Cons`: Text reviews of the cons of working at IBM
